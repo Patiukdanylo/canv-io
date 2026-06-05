@@ -131,3 +131,76 @@ POST   /courses/{c}/questions                  # authoring (contributor/admin)
 3. Introduce backend, auth, authoring, analytics.
 4. Multi-tenant universities + selectable skins.
 5. Contributor marketplace + AI authoring/grading at scale.
+
+## 8. Backend & automatic course generation (the engine that keeps content fresh)
+
+The differentiator: instead of hand-writing every question bank, Canv.io can
+**pull a student's own course materials straight from their university's LMS
+(Canvas) and turn them into practice exams automatically**, refreshing as
+courses change.
+
+A scaffolded **FastAPI** service lives in [`/backend`](../backend) (Python is
+the best fit for Canvas API + PDF/PPTX parsing + LLM generation; Node/Go are
+swappable alternatives).
+
+### 8.1 Why Canvas is reachable *without scraping*
+Thomas More (and most universities) run **Canvas by Instructure**, which ships
+an **official REST API** (`/api/v1/...`). We use that — scraping is unnecessary
+and would breach Canvas' Terms. Endpoints we rely on:
+`GET /courses`, `/courses/:id/modules`, `/courses/:id/files`, `/courses/:id/pages`.
+
+### 8.2 Access model (and its hard constraint)
+- **Multi-user access MUST use OAuth2** — Canvas' API policy forbids collecting
+  users' personal access tokens for a shared app (those are dev-only).
+- OAuth2 requires a **Developer Key approved by the institution's Canvas admin**
+  (Thomas More IT). Until that exists, the realistic path is: a single user
+  connects their **own** account (their token, their data) for personal use.
+- The legitimate product model: **each student connects their own Canvas**, and
+  we generate practice material **from their materials, for their use** — we do
+  not redistribute institutional content publicly. (See BUSINESS_PLAN §12.)
+
+### 8.3 The ingestion → generation pipeline
+```
+Canvas (OAuth2 Bearer token)
+   │  canvas_client.py   list_courses / list_files / list_pages / download
+   ▼
+raw PDF / PPTX / HTML
+   │  ingestion.py       extract text per page/slide → TextChunk(+source_ref)
+   ▼
+clean, chunked text
+   │  generator.py       LLM (Anthropic) → questions in schemas.Question shape
+   ▼                     + HUMAN REVIEW gate (quality + IP)
+CourseBank (schemas.py) ──►  the existing exam engine (public/app) consumes it
+```
+Generated questions use the **exact JSON shape the static app already reads**
+(`BANK` / `QUIZZES` in `public/app/data.js`), so freshly generated content drops
+straight into the take-exam flow with zero engine changes.
+
+### 8.4 Service layout (scaffolded)
+```
+backend/app/
+├── main.py                 FastAPI app, CORS, /health
+├── config.py               env settings (Canvas keys, LLM key, DB)
+├── api/
+│   ├── auth.py             Canvas OAuth2 login + callback
+│   ├── courses.py          list courses · POST /{id}/sync (bg job) · GET bank
+│   └── exams.py            list · draw fresh paper · submit + grade
+├── services/
+│   ├── canvas_client.py    async REST client w/ pagination
+│   ├── ingestion.py        PDF/PPTX/HTML → text chunks
+│   └── generator.py        chunks → reviewed question bank (LLM)
+└── models/schemas.py       Question · ExamRecipe · Course · CourseBank
+```
+
+### 8.5 "Always fresh" updates
+- A per-course **sync job** (`POST /courses/{id}/sync`) re-fetches Canvas,
+  diffs against the last ingest, regenerates only changed material, and bumps
+  the bank version — so students always practise the current syllabus.
+- Status is pollable (`IngestStatus`) so the UI can show
+  *fetching → parsing → generating → ready*.
+
+### 8.6 Non-negotiable guardrails
+- **Human-in-the-loop review** before any generated bank is shown.
+- **Never reproduce real exam papers**; generate original practice items only.
+- **Per-user, private** generation by default; no public redistribution of a
+  university's copyrighted materials.

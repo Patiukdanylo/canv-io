@@ -18,3 +18,10 @@ build/
 # Local data / scratch
 tmp/
 *.local
+
+# Python / backend
+__pycache__/
+*.pyc
+.venv/
+backend/.env
+backend/*.db

@@ -30,6 +30,7 @@ A focused practice platform:
 - **Mixed question types** — multiple-choice, fill-in-the-blank, matching, and essays — matching real theory exams.
 - **Instant, explained grading** — auto-grading for objective types; model answers + self-grading for essays.
 - **Progress tracking** — saved attempts, scores, targets (e.g. 80% pass line), and review of any past attempt.
+- **Auto-generated, always-fresh courses (the moat)** — students connect their **own** Canvas account; Canv.io pulls *their* course files via Canvas' official API, and an LLM turns them into practice exams that **refresh as the syllabus changes**. Content scales without hand-authoring every bank. (See §12 for the access & IP constraints that keep this legitimate.)
 
 **Positioning statement:** *Practise the exam, not just the notes — and walk in already familiar with it.*
 
@@ -114,6 +115,13 @@ This is a serious part of the plan, not a footnote.
 - **Academic-integrity stance.** Position explicitly as **exam preparation**, not as a way to obtain or leak real exam content. This protects users and the brand.
 - **Data protection (GDPR / EU).** Likely EU users → GDPR applies. Minimise personal data, get clear consent, allow export/delete, store securely. Early versions keep data in the browser (`localStorage`); a multi-user version adds a backend with proper data-protection design.
 - **Terms & disclaimers.** Clear ToS: independent tool, no affiliation/endorsement, practice only, no guarantee of exam outcomes.
+
+### 12.1 Canvas data access (specific to the auto-generation feature)
+- **Use the official API, never scraping.** Canvas (Instructure) exposes a REST API; scraping the web UI would breach its Terms. We only call documented endpoints.
+- **OAuth2 is mandatory for a multi-user app.** Canvas' API policy forbids collecting users' personal access tokens for a shared application — those are for local development only. Production must use **OAuth2**, which requires a **Developer Key approved by the institution's Canvas administrator** (Thomas More IT). This is a real dependency and a partnership conversation, not just code.
+- **Process the student's own materials, for the student.** Each user connects *their* account and we generate practice items from *their* course content for *their* private use. We do **not** redistribute a university's copyrighted materials publicly, and generated questions are **original practice items**, never copies of real exam papers.
+- **Consent & revocation.** Connecting Canvas is opt-in, scoped to the minimum read permissions, and revocable; ingested source material is stored only as long as needed to generate and refresh banks.
+- **Human review gate.** Auto-generated banks pass a quality/IP review before students see them.
 
 ## 13. Risks & mitigations
 

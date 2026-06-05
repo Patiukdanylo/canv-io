@@ -1,0 +1,17 @@
+# Canv.io API — core dependencies (pin versions when you lock the env)
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+httpx                # async Canvas REST API client
+authlib              # Canvas OAuth2 flow
+sqlalchemy           # persistence (Postgres in prod, SQLite in dev)
+python-dotenv
+
+# document ingestion / text extraction
+pypdf                # PDF text
+python-pptx          # PowerPoint text
+beautifulsoup4       # Canvas "pages" (HTML) cleanup
+
+# AI / LLM (pick one provider; Anthropic shown as default)
+anthropic            # generate question banks from course text

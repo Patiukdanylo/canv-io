@@ -29,8 +29,12 @@ Each phase is shippable on its own and de-risks the next.
 - **Content authoring tools** with validation + versioning.
 - **Progress analytics** (weak topics, readiness vs target, trends).
 
-## Phase 4 — AI assistance (labelled, optional)
-- AI-assisted **question drafting** from learning objectives (human-reviewed before publishing).
+## Phase 4 — Canvas ingestion + AI course generation (the moat)
+*Backend scaffolded in [`/backend`](../backend) (FastAPI).*
+- **Canvas OAuth2 integration** — secure a Developer Key with Thomas More IT; let a student connect their **own** Canvas account (official REST API, no scraping).
+- **Ingestion pipeline** — fetch course files/pages, extract text (PDF/PPTX/HTML), chunk with source references.
+- **LLM generation** — turn course text into original practice questions in the app's existing bank format; **human-review gate** before publishing.
+- **Always-fresh sync** — re-fetch on a schedule, regenerate only changed material, version the bank.
 - AI **essay feedback** against a rubric (guidance, not an authoritative grade).
 - AI **study suggestions** (“drill these topics before your exam”).
 
