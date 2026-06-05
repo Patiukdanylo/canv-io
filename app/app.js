@@ -6,9 +6,44 @@ const shuffle = a => { a=a.slice(); for(let i=a.length-1;i>0;i--){const j=Math.f
 const esc = s => (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function norm(s){ return (s||"").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g,"")
   .replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim(); }
-const LS = "ai_canvas_attempts_v1";
-const loadAtt = ()=> JSON.parse(localStorage.getItem(LS)||"{}");
-const saveAtt = o => localStorage.setItem(LS, JSON.stringify(o));
+const initials = n => (n||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+
+/* ---------- the Canv.io mark (logo) ---------- */
+const MARK_SVG = `<svg viewBox="0 0 96 96" width="100%" height="100%" preserveAspectRatio="xMidYMid meet"><rect width="96" height="96" rx="22" fill="#ee5a2c"/><path d="M24 55 A24 24 0 1 1 72 55" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round"/><path d="M21 64 C40 56 64 56 81 60 C64 68 39 72 21 64 Z" fill="#fff"/></svg>`;
+
+/* ===================== AUTH (client-side; prototype only — not secure) ===================== */
+const USERS_LS="canvio_users", SESS_LS="canvio_session";
+const loadUsers = ()=> JSON.parse(localStorage.getItem(USERS_LS)||"null");
+const saveUsers = u => localStorage.setItem(USERS_LS, JSON.stringify(u));
+function seedUsers(){
+  if(loadUsers()) return;
+  saveUsers([
+    { name:"Admin",   email:"admin@canv.io",   pass:"admin123",   role:"admin"   },
+    { name:"Student", email:"student@canv.io", pass:"student123", role:"student" },
+  ]);
+}
+const currentUser = ()=>{ const e=localStorage.getItem(SESS_LS); return e ? (loadUsers()||[]).find(u=>u.email===e)||null : null; };
+function login(email,pass){
+  const u=(loadUsers()||[]).find(x=>x.email===(email||"").toLowerCase().trim());
+  if(!u || u.pass!==pass) return "Invalid email or password.";
+  localStorage.setItem(SESS_LS,u.email); return null;
+}
+function register(name,email,pass){
+  email=(email||"").toLowerCase().trim(); name=(name||"").trim();
+  if(!name||!email||!pass) return "Please fill in every field.";
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return "Enter a valid email address.";
+  if(pass.length<6) return "Password must be at least 6 characters.";
+  const us=loadUsers()||[];
+  if(us.some(u=>u.email===email)) return "That email is already registered.";
+  us.push({name,email,pass,role:"student"}); saveUsers(us);
+  localStorage.setItem(SESS_LS,email); return null;
+}
+function logout(){ localStorage.removeItem(SESS_LS); state.view="auth"; renderAuth(); }
+
+/* ---------- per-user attempt storage ---------- */
+const attKey = ()=>{ const u=currentUser(); return "canvio_att_"+(u?u.email:"anon"); };
+const loadAtt = ()=> JSON.parse(localStorage.getItem(attKey())||"{}");
+const saveAtt = o => localStorage.setItem(attKey(), JSON.stringify(o));
 
 /* ---------- app state ---------- */
 const state = { view:"quizzes", quizId:null, exam:null, cur:0, started:null, timer:null, review:null, flash:"" };
@@ -27,18 +62,23 @@ const ICONS = {
   help:   ic('<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.9.4-1 .9-1 1.7"/><circle cx="12" cy="17" r=".6" fill="currentColor"/>'),
   news:   ic('<rect x="3" y="5" width="14" height="14" rx="1.5"/><path d="M17 9h3v8a2 2 0 0 1-2 2H7M6 9h6M6 12h6M6 15h4"/>')
 };
-function railHTML(){
-  const item=(key,label,svg,opts={})=>`<button class="item ${opts.cls||''}" onclick="${opts.click||''}">
-     ${opts.badge?`<span class="badge">${opts.badge}</span>`:''}${svg}<span>${label}</span></button>`;
+function railHTML(active){
+  const u = currentUser();
+  const item=(label,svg,click,on)=>`<button class="item ${on?'act':''}" onclick="${click}">${svg}<span>${label}</span></button>`;
+  const adminItem = u && u.role==="admin"
+    ? item('Admin', ic('<path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/>'), 'renderAdmin()', active==='Admin')
+    : "";
   return `<div class="rail">
-    <button class="item" onclick="goQuizzes()"><span class="avatar"></span><span>Account</span></button>
-    ${item('course','Courses',ICONS.course,{cls:'act',click:'goQuizzes()'})}
+    <button class="item ${active==='Account'?'act':''}" onclick="renderProfile()"><span class="avatar">${u?initials(u.name):''}</span><span>Account</span></button>
+    ${item('Courses',ICONS.course,'renderCourses()',active==='Courses')}
+    ${item('Settings', ic('<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L14.5 2h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L4.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/>'),'renderSettings()',active==='Settings')}
+    ${adminItem}
   </div>`;
 }
 
 /* ---------- course nav column ---------- */
 function navHTML(active){
-  const links=[["Home","goQuizzes()"]];
+  const links=[["Home","renderCourses()"],["Quizzes","goQuizzes()"]];
   return `<div class="coursenav"><div class="term">AJ 2025 Semester 2</div>${
     links.map(([l,click,pill])=>`<a class="${active===l?'act':''}" onclick="${click||''}">${l}${pill?`<span class="pill">${pill}</span>`:''}</a>`).join("")
   }</div>`;
@@ -47,11 +87,16 @@ function navHTML(active){
 /* ---------- top bar + breadcrumb ---------- */
 function topHTML(crumbTail){
   const tail = crumbTail||"";
+  const u = currentUser();
+  const acct = u ? `<div class="acctbox">
+      <button class="acct" onclick="renderProfile()"><span class="ava">${initials(u.name)}</span><span class="an">${esc(u.name)}</span></button>
+      <button class="signout" onclick="logout()">Sign out</button>
+    </div>` : "";
   return `<div class="topbar">
-    <div class="brand"><span class="t1">CANV</span><span class="t2">.io</span></div>
-    <button class="hamb">&#9776;</button>
-    <div class="crumbs"><a onclick="goQuizzes()">Demo Course — AI (example bank)</a>
-      <span class="sep">&#9656;</span><a onclick="goQuizzes()">Quizzes</a>${tail}</div>
+    <button class="brand" onclick="renderCourses()"><span class="bmark">${MARK_SVG}</span><span class="bword">Canv<span class="io">.io</span></span></button>
+    <div class="crumbs"><a onclick="renderCourses()">Courses</a>
+      <span class="sep">&#9656;</span><a onclick="goQuizzes()">Artificial Intelligence</a>${tail}</div>
+    ${acct}
   </div>`;
 }
 
@@ -60,7 +105,8 @@ function paint(mainHTML, opts={}){
   const tail = opts.crumb? `<span class="sep">&#9656;</span><span class="cur">${esc(opts.crumb)}</span>`:"";
   const right = opts.right? `<div class="qpanel">${opts.right}</div>`:"";
   const inner = opts.right? `<div class="withside"><div>${mainHTML}</div>${right}</div>` : mainHTML;
-  $("#root").innerHTML = topHTML(tail) + `<div class="shell">${railHTML()}${navHTML(opts.nav||"")}<div class="main">${inner}</div></div>`;
+  const nav = opts.bareNav ? "" : navHTML(opts.nav||"");
+  $("#root").innerHTML = topHTML(tail) + `<div class="shell">${railHTML(opts.rail||"")}${nav}<div class="main">${inner}</div></div>`;
   if(opts.after) opts.after();
 }
 
@@ -79,7 +125,7 @@ function goQuizzes(){ stopTimer(); state.view="quizzes"; state.exam=null; state.
   }).join("");
   paint(`<h1>Quizzes</h1>
     <p class="muted small">AI mock exams — pick one. Every attempt draws fresh questions from the bank, so you can take the same exam again and again with different questions. Multiple-choice, fill-in-the-blank and matching are graded automatically; essays get a model answer for self-grading.</p>
-    <div class="qzlist">${rows}</div>`, {nav:"Home"});
+    <div class="qzlist">${rows}</div>`, {nav:"Quizzes", rail:"Courses"});
 }
 function composeInfo(qz){
   const pools = poolsFor(qz);
@@ -292,5 +338,132 @@ function setEssay(uid,v){ const q=state.exam.find(x=>x.uid===uid); q.selfScore=v
   const pe=$("#pts-"+uid); if(pe) pe.textContent=`${v} / ${q.pts} pts`;
   drawScore(); updatePersistedScore(); }
 
+/* =========================================================== AUTH SCREEN */
+let authMode = "login";
+function renderAuth(msg){
+  const login = authMode==="login";
+  $("#root").innerHTML = `
+    <div class="authpage">
+      <div class="authcard">
+        <div class="authlogo"><span class="lmark">${MARK_SVG}</span><span>Canv<span class="io">.io</span></span></div>
+        <h1>${login?"Welcome back":"Create your account"}</h1>
+        <p class="authsub">${login?"Log in to reach your courses and mock exams.":"Start rehearsing your exams in under a minute."}</p>
+        ${msg?`<div class="autherr">${esc(msg)}</div>`:""}
+        ${login?"":`<label class="fld">Name<input id="au-name" type="text" placeholder="Your name" autocomplete="name"></label>`}
+        <label class="fld">Email<input id="au-email" type="email" placeholder="you@school.edu" autocomplete="email"></label>
+        <label class="fld">Password<input id="au-pass" type="password" placeholder="••••••••" autocomplete="${login?'current-password':'new-password'}"></label>
+        <button class="authbtn" onclick="doAuth()">${login?"Log in":"Create account"}</button>
+        <div class="authswap">${login?"New to Canv.io?":"Already have an account?"} <a onclick="swapAuth()">${login?"Create an account":"Log in"}</a></div>
+        <div class="authdemo"><b>Demo accounts</b><div>admin@canv.io · admin123</div><div>student@canv.io · student123</div></div>
+      </div>
+      <p class="authfoot">Canv.io — practise the exam, not just the notes.</p>
+    </div>`;
+  const em=$("#au-email"); if(em) em.focus();
+  document.querySelectorAll(".authcard input").forEach(i=>i.addEventListener("keydown",e=>{ if(e.key==="Enter") doAuth(); }));
+}
+function swapAuth(){ authMode = authMode==="login"?"register":"login"; renderAuth(); }
+function doAuth(){
+  const email=($("#au-email")||{}).value, pass=($("#au-pass")||{}).value;
+  let err;
+  if(authMode==="login") err=login(email,pass);
+  else err=register((($("#au-name")||{}).value)||"", email, pass);
+  if(err) return renderAuth(err);
+  renderCourses();
+}
+
+/* =========================================================== COURSES (home) */
+const COURSES = [
+  { id:"ai", name:"Artificial Intelligence", term:"AJ 2025 · Semester 2",
+    desc:"Machine learning, deep learning, graph search & more. Mock exams drawn from a live question bank.",
+    live:true },
+];
+function renderCourses(){
+  stopTimer(); state.view="courses";
+  const u=currentUser(); if(!u) return renderAuth();
+  const att=loadAtt(); const totalAtt=Object.values(att).reduce((s,a)=>s+a.length,0);
+  const cards = COURSES.map(c=>`
+    <button class="ccard" onclick="goQuizzes()">
+      <span class="cmark">${MARK_SVG}</span>
+      <span class="cmeta"><span class="cname">${esc(c.name)}</span>
+        <span class="cterm">${esc(c.term)}</span>
+        <span class="cdesc">${esc(c.desc)}</span>
+        <span class="cstat">${QUIZZES.length} mock exams${totalAtt?` · ${totalAtt} attempt${totalAtt>1?'s':''}`:''}</span></span>
+    </button>`).join("");
+  paint(`<h1>Welcome back, ${esc(u.name.split(" ")[0])}.</h1>
+    <p class="muted small">Your courses and mock exams. Pick a course to start rehearsing — every attempt draws fresh questions.</p>
+    <div class="ccards">${cards}</div>`,
+    { rail:"Courses", bareNav:true, crumb:"Courses" });
+}
+
+/* =========================================================== PROFILE */
+function renderProfile(){
+  stopTimer(); state.view="profile";
+  const u=currentUser(); if(!u) return renderAuth();
+  const att=loadAtt(); const totalAtt=Object.values(att).reduce((s,a)=>s+a.length,0);
+  const scores=Object.values(att).flat().map(a=>a.score); const best=scores.length?Math.max(...scores):null;
+  paint(`<h1>Your profile</h1>
+    <div class="profile">
+      <span class="pava">${initials(u.name)}</span>
+      <div><div class="pname">${esc(u.name)}</div><div class="muted">${esc(u.email)}</div>
+        <span class="rolechip ${u.role}">${u.role}</span></div>
+    </div>
+    <div class="scards">
+      <div class="scard"><div class="n">${COURSES.length}</div><div class="l">Enrolled courses</div></div>
+      <div class="scard"><div class="n">${QUIZZES.length}</div><div class="l">Mock exams available</div></div>
+      <div class="scard"><div class="n">${totalAtt}</div><div class="l">Attempts taken</div></div>
+      <div class="scard"><div class="n">${best!=null?best:'—'}</div><div class="l">Best score</div></div>
+    </div>
+    <div class="rowbtns"><button class="btn" onclick="renderCourses()">My courses</button>
+      <button class="btn g" onclick="renderSettings()">Settings</button></div>`,
+    { rail:"Account", bareNav:true, crumb:"Profile" });
+}
+
+/* =========================================================== SETTINGS */
+function renderSettings(){
+  stopTimer(); state.view="settings";
+  const u=currentUser(); if(!u) return renderAuth();
+  paint(`<h1>Settings</h1>
+    <div class="setblock">
+      <h2>Profile</h2>
+      <label class="fld">Display name<input id="set-name" type="text" value="${esc(u.name)}"></label>
+      <div class="rowbtns"><button class="btn" onclick="saveName()">Save changes</button></div>
+      <div id="set-msg" class="setmsg"></div>
+    </div>
+    <div class="setblock">
+      <h2>Account</h2>
+      <p class="muted small">Signed in as <b>${esc(u.email)}</b> (${u.role}).</p>
+      <div class="rowbtns"><button class="btn g" onclick="resetProgress()">Reset my attempt history</button>
+        <button class="btn danger" onclick="logout()">Sign out</button></div>
+    </div>`,
+    { rail:"Settings", bareNav:true, crumb:"Settings" });
+}
+function saveName(){
+  const v=($("#set-name").value||"").trim(); if(!v) return;
+  const us=loadUsers(); const u=us.find(x=>x.email===currentUser().email); u.name=v; saveUsers(us);
+  const m=$("#set-msg"); if(m){ m.textContent="Saved."; m.className="setmsg ok"; }
+}
+function resetProgress(){
+  if(!confirm("Delete all your saved attempts? This cannot be undone.")) return;
+  localStorage.removeItem(attKey()); renderSettings();
+}
+
+/* =========================================================== ADMIN */
+function renderAdmin(){
+  stopTimer(); state.view="admin";
+  const u=currentUser(); if(!u||u.role!=="admin") return renderCourses();
+  const us=loadUsers()||[];
+  const rows=us.map(x=>{
+    const att=JSON.parse(localStorage.getItem("canvio_att_"+x.email)||"{}");
+    const n=Object.values(att).reduce((s,a)=>s+a.length,0);
+    return `<tr><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td><span class="rolechip ${x.role}">${x.role}</span></td><td>${n}</td></tr>`;
+  }).join("");
+  paint(`<h1>Admin · Users</h1>
+    <p class="muted small">${us.length} registered account${us.length>1?'s':''} on this device.</p>
+    <table class="hist atbl"><tr><th>Name</th><th>Email</th><th>Role</th><th>Attempts</th></tr>${rows}</table>
+    <p class="muted small" style="margin-top:14px">In production this is served by the backend (real auth + database). Here it reads local accounts for the demo.</p>`,
+    { rail:"Admin", bareNav:true, crumb:"Admin" });
+}
+
 /* ---------- boot ---------- */
-goQuizzes();
+function boot(){ seedUsers(); if(currentUser()) renderCourses(); else renderAuth(); }
+boot();
