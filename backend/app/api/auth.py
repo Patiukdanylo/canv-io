@@ -1,32 +1,63 @@
-"""Canvas OAuth2 flow + Canv.io session.
+"""App authentication: register, login (JWT), and current-user."""
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
 
-Multi-user Canvas access REQUIRES OAuth2 (a Developer Key approved by the
-institution's Canvas admin). Flow:
-  1. GET  /auth/canvas/login     -> redirect user to Canvas authorize URL
-  2. Canvas redirects back with ?code=...
-  3. GET  /auth/canvas/callback  -> exchange code for an access token, store it
-                                    server-side bound to the Canv.io user
-"""
-from fastapi import APIRouter
-from ..config import settings
+from ..db import get_db
+from ..models.db_models import User
+from ..core.security import hash_password, verify_password, create_access_token
+from ..core.deps import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.get("/canvas/login")
-async def canvas_login():
-    """Build the Canvas authorize URL and redirect. TODO: implement."""
-    authorize = (
-        f"{settings.canvas_base_url}/login/oauth2/auth"
-        f"?client_id={settings.canvas_client_id}"
-        f"&response_type=code"
-        f"&redirect_uri={settings.canvas_redirect_uri}"
-        f"&scope=url:GET|/api/v1/courses url:GET|/api/v1/courses/:id/files"
-    )
-    return {"redirect": authorize}
+class RegisterIn(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
 
 
-@router.get("/canvas/callback")
-async def canvas_callback(code: str):
-    """Exchange `code` at /login/oauth2/token for an access token. TODO."""
-    raise NotImplementedError
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserOut(BaseModel):
+    id: int
+    name: str
+    email: EmailStr
+    role: str
+
+    class Config:
+        from_attributes = True
+
+
+@router.post("/register", response_model=TokenOut, status_code=201)
+def register(body: RegisterIn, db: Session = Depends(get_db)):
+    if len(body.password) < 6:
+        raise HTTPException(422, "Password must be at least 6 characters.")
+    email = body.email.lower()
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(409, "That email is already registered.")
+    user = User(name=body.name.strip(), email=email,
+                password_hash=hash_password(body.password), role="student")
+    db.add(user); db.commit(); db.refresh(user)
+    return TokenOut(access_token=create_access_token(user.email, user.role))
+
+
+@router.post("/login", response_model=TokenOut)
+def login(body: LoginIn, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == body.email.lower()).first()
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
+    return TokenOut(access_token=create_access_token(user.email, user.role))
+
+
+@router.get("/me", response_model=UserOut)
+def me(user: User = Depends(get_current_user)):
+    return user
