@@ -6,7 +6,10 @@ student's own Canvas materials into practice question banks.
 
 > **Status:** foundation built & verified — containers, Postgres, full schema,
 > Alembic migrations, seeders, secure JWT auth, encrypted Canvas-token storage.
-> Canvas fetching + AI generation are stubbed (next task).
+> Canvas fetching + AI generation are stubbed.
+>
+> **📋 What's next & why → [`PLAN.md`](PLAN.md)** — the phased build plan
+> (upload-first ingestion, AI generation, frontend integration, Canvas OAuth).
 
 ## Run it (Docker)
 ```bash
