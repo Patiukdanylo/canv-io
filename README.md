@@ -14,10 +14,10 @@
 
 | | |
 |---|---|
-| **Stage** | Working offline prototype (MVP-0) + project dossier |
-| **Prototype** | Static HTML/CSS/JS, no backend, runs from a single file |
-| **This folder** | Official project documentation (idea → product → business) |
-| **Next** | GitHub repository, then backend + multi-course platform |
+| **Stage** | Full-stack build in progress, on top of a working offline prototype |
+| **Backend** | FastAPI · PostgreSQL · SQLAlchemy + Alembic · JWT auth · Docker |
+| **Frontend** | React 18 · TypeScript · Vite (`web/`), plus the original zero-dependency prototype (`app/`) |
+| **Integrations** | Canvas LMS OAuth (encrypted token storage) · AI-assisted question generation |
 
 ## What it is
 
@@ -41,6 +41,36 @@ Every attempt draws **fresh questions from a bank**, so a single mock exam becom
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phased plan from prototype → multi-university platform. |
 | [`app/`](app/) | Working prototype (MVP-0) — the live, offline example of the product. |
 | [`LICENSE.md`](LICENSE.md) | Licensing / IP position. |
+
+## How it's built
+
+```
+backend/          FastAPI service
+  app/api/        auth · courses · exams · Canvas OAuth endpoints
+  app/core/       JWT issuing, password hashing, encrypted token storage
+  app/models/     SQLAlchemy tables + Pydantic schemas
+  app/services/   material ingestion, AI question generation, Canvas client
+  alembic/        database migrations
+  docker-compose.yml   API + PostgreSQL, one command to boot
+web/              React 18 + TypeScript + Vite client
+app/              original zero-dependency prototype (opens straight in a browser)
+```
+
+**Run the backend**
+```bash
+cd backend
+cp .env.example .env      # fill in your own secrets
+docker compose up --build # API + PostgreSQL, migrations and seeds applied
+```
+
+**Run the web client**
+```bash
+cd web && npm install && npm run dev
+```
+
+Grading, attempt history and question-bank regeneration live server-side; the
+question bank is generated from uploaded course material and re-sampled on every
+attempt, so each mock exam is a fresh paper rather than a fixed one.
 
 ## Vision in one line
 

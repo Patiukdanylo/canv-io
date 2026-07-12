@@ -46,7 +46,19 @@ const loadAtt = ()=> JSON.parse(localStorage.getItem(attKey())||"{}");
 const saveAtt = o => localStorage.setItem(attKey(), JSON.stringify(o));
 
 /* ---------- app state ---------- */
-const state = { view:"quizzes", quizId:null, exam:null, cur:0, started:null, timer:null, review:null, flash:"" };
+const state = { view:"quizzes", quizId:null, exam:null, cur:0, started:null, timer:null, review:null, flash:"", courseId:"ai" };
+
+/* ---------- course registry: each course brings its own bank + quizzes ---------- */
+const COURSE_DATA = {
+  ai:   { bank: AI_BANK,   quizzes: AI_QUIZZES },
+  java: { bank: JAVA_BANK, quizzes: JAVA_QUIZZES },
+};
+let BANK, QUIZZES;
+function selectCourse(id){
+  if(!COURSE_DATA[id]) id = "ai";
+  state.courseId = id; BANK = COURSE_DATA[id].bank; QUIZZES = COURSE_DATA[id].quizzes;
+}
+selectCourse("ai");
 
 /* ---------- rail icons (inline svg) ---------- */
 function ic(p,extra=""){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`; }
@@ -111,6 +123,7 @@ function paint(mainHTML, opts={}){
 }
 
 /* =========================================================== QUIZZES INDEX */
+function openCourse(id){ selectCourse(id); goQuizzes(); }
 function goQuizzes(){ stopTimer(); state.view="quizzes"; state.exam=null; state.review=null;
   const rocket=`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8.5l-9.19 9.19a4 4 0 0 1-5.66-5.66l9-9a2.5 2.5 0 0 1 3.54 3.54l-9.02 9.02a1 1 0 0 1-1.42-1.42l8.31-8.31"/></svg>`;
   const rows = QUIZZES.map(qz=>{
@@ -149,7 +162,8 @@ function buildExam(qz){
   ];
   chosen = shuffle(chosen);
   chosen.forEach((q,i)=>{ q.uid=i; q.resp=undefined; q.matchResp={}; q.selfScore=null;
-    if(q.t==="mc") q._opts=shuffle(q.o);
+    if(q.t==="mc"||q.t==="multi") q._opts=shuffle(q.o);
+    if(q.t==="multi") q.resp=[];
     if(q.t==="match") q._right=shuffle(q.right); });
   return chosen;
 }
@@ -194,6 +208,7 @@ function resumeAttempt(){ state.view="take"; startTimer(); renderTake(); }
 
 function answered(q){
   if(q.t==="mc"||q.t==="fill") return q.resp!==undefined && q.resp!=="";
+  if(q.t==="multi") return Array.isArray(q.resp) && q.resp.length>0;
   if(q.t==="essay") return q.resp && q.resp.trim().length>0;
   if(q.t==="match") return q.left.every(l=>q.matchResp[l]);
   return false;
@@ -206,6 +221,9 @@ function renderTake(){
   let body="";
   if(q.t==="mc"){
     body = q._opts.map(o=>`<label class="opt"><input type="radio" name="opt" value="${esc(o)}" ${q.resp===o?'checked':''}><span>${esc(o)}</span></label>`).join("");
+  } else if(q.t==="multi"){
+    const sel = q.resp||[];
+    body = `<p class="muted small" style="margin:0 0 8px">Select <b>all</b> that apply.</p>` + q._opts.map(o=>`<label class="opt"><input type="checkbox" name="opt" value="${esc(o)}" ${sel.includes(o)?'checked':''}><span>${esc(o)}</span></label>`).join("");
   } else if(q.t==="fill"){
     body = `<div class="fill"><input id="fillin" type="text" autocomplete="off" placeholder="Type your answer…" value="${esc(q.resp||'')}"></div>`;
   } else if(q.t==="essay"){
@@ -234,6 +252,8 @@ function renderTake(){
 function bindInputs(){
   const q=state.exam[state.cur];
   if(q.t==="mc") document.querySelectorAll('input[name=opt]').forEach(r=>r.addEventListener("change",()=>{q.resp=r.value;mark();}));
+  if(q.t==="multi") document.querySelectorAll('input[name=opt]').forEach(c=>c.addEventListener("change",()=>{
+    q.resp = Array.from(document.querySelectorAll('input[name=opt]:checked')).map(x=>x.value); mark(); }));
   if(q.t==="fill"){ const i=$("#fillin"); i.addEventListener("input",()=>{q.resp=i.value;mark();}); i.focus(); }
   if(q.t==="essay"){ const t=$("#essaybox"); t.addEventListener("input",()=>{q.resp=t.value;mark();}); }
   if(q.t==="match") document.querySelectorAll('select[data-left]').forEach(s=>s.addEventListener("change",()=>{q.matchResp[s.dataset.left]=s.value;mark();}));
@@ -255,6 +275,8 @@ const hm = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()
 function gradeFill(q){ const u=norm(q.resp); if(!u) return 0;
   return q.accept.some(a=>{const an=norm(a); return u===an||u.includes(an)||(an.includes(u)&&u.length>=3);})?q.pts:0; }
 function gradeMatch(q){ let ok=0; q.left.forEach(l=>{ if(q.matchResp[l]===q.correct[l]) ok++; }); return Math.round((ok/q.left.length)*q.pts*100)/100; }
+function gradeMulti(q){ const sel=(q.resp||[]).map(norm).sort(), cor=(q.a||[]).map(norm).sort();
+  return (sel.length===cor.length && sel.every((v,i)=>v===cor[i])) ? q.pts : 0; }
 function estimateEssay(q){ if(!q.resp) return 0; const t=norm(q.resp); let h=0; q.keywords.forEach(k=>{ if(t.includes(norm(k))) h++; }); return Math.max(0,Math.min(5,Math.round((h/q.keywords.length)*6))); }
 
 function submitQuiz(){
@@ -263,6 +285,7 @@ function submitQuiz(){
   stopTimer();
   state.exam.forEach(q=>{
     if(q.t==="mc") q.earned=(q.resp===q.a)?q.pts:0;
+    else if(q.t==="multi") q.earned=gradeMulti(q);
     else if(q.t==="fill") q.earned=gradeFill(q);
     else if(q.t==="match") q.earned=gradeMatch(q);
     else if(q.t==="essay"){ q.estimate=estimateEssay(q); q.selfScore=q.estimate; q.earned=q.estimate; }
@@ -302,6 +325,12 @@ function renderResults(readonly){
     if(q.t==="mc"){
       body=(q._opts||q.o).map(o=>{ const isA=o===q.a, isP=o===q.resp; let c=isA?"ans-correct":(isP&&!isA?"ans-wrong":"");
         let mk=isA?`<span class="mk g">✓ correct answer</span>`:(isP?`<span class="mk r">✗ your answer</span>`:"");
+        return `<div class="opt ${c}"><span>${esc(o)}</span>${mk}</div>`; }).join("");
+    } else if(q.t==="multi"){
+      const sel=q.resp||[], cor=q.a||[];
+      body=(q._opts||q.o).map(o=>{ const isA=cor.includes(o), isP=sel.includes(o);
+        let c=isA?"ans-correct":(isP&&!isA?"ans-wrong":"");
+        let mk=isA?(isP?`<span class="mk g">✓ correct · you picked</span>`:`<span class="mk g">✓ correct answer</span>`):(isP?`<span class="mk r">✗ your pick</span>`:"");
         return `<div class="opt ${c}"><span>${esc(o)}</span>${mk}</div>`; }).join("");
     } else if(q.t==="fill"){
       body=`<div class="opt ${q.earned>0?'ans-correct':'ans-wrong'}"><span>Your answer: <b>${esc(q.resp||'(blank)')}</b></span><span class="mk ${q.earned>0?'g':'r'}">${q.earned>0?'✓':'✗'}</span></div>
@@ -376,19 +405,24 @@ const COURSES = [
   { id:"ai", name:"Artificial Intelligence", term:"AJ 2025 · Semester 2",
     desc:"Machine learning, deep learning, graph search & more. Mock exams drawn from a live question bank.",
     live:true },
+  { id:"java", name:"Java Development", term:"AJ 2025 · Semester 2",
+    desc:"Spring Boot, JPA/Hibernate, REST, JUnit/Mockito, SOLID, GoF patterns, microservices & IAM. Theory mock exams: MC, multiple-answer & fill-the-gap.",
+    live:true },
 ];
 function renderCourses(){
   stopTimer(); state.view="courses";
   const u=currentUser(); if(!u) return renderAuth();
   const att=loadAtt(); const totalAtt=Object.values(att).reduce((s,a)=>s+a.length,0);
-  const cards = COURSES.map(c=>`
-    <button class="ccard" onclick="goQuizzes()">
+  const cards = COURSES.map(c=>{
+    const nq = (COURSE_DATA[c.id]?COURSE_DATA[c.id].quizzes.length:0);
+    return `
+    <button class="ccard" onclick="openCourse('${c.id}')">
       <span class="cmark">${MARK_SVG}</span>
       <span class="cmeta"><span class="cname">${esc(c.name)}</span>
         <span class="cterm">${esc(c.term)}</span>
         <span class="cdesc">${esc(c.desc)}</span>
-        <span class="cstat">${QUIZZES.length} mock exams${totalAtt?` · ${totalAtt} attempt${totalAtt>1?'s':''}`:''}</span></span>
-    </button>`).join("");
+        <span class="cstat">${nq} mock exams${totalAtt?` · ${totalAtt} attempt${totalAtt>1?'s':''}`:''}</span></span>
+    </button>`;}).join("");
   paint(`<h1>Welcome back, ${esc(u.name.split(" ")[0])}.</h1>
     <p class="muted small">Your courses and mock exams. Pick a course to start rehearsing — every attempt draws fresh questions.</p>
     <div class="ccards">${cards}</div>`,
